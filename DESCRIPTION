@@ -28,16 +28,14 @@ Imports:
     glue,
     htmltools,
     htmlwidgets,
-    httr2,
+    httr2 (>= 1.0.3.9000),
     ids,
     jsonlite,
     purrr,
-    R6 (>= 2.0),
     rlang,
     rstudioapi (>= 0.12),
     shiny (>= 1.9.0),
     shiny.i18n,
-    SSEparser,
     stringr (>= 1.5.0),
     utils,
     yaml
@@ -57,6 +55,8 @@ Suggests:
     withr
 Config/testthat/edition: 3
 Config/testthat/parallel: true
+Remotes:
+    r-lib/httr2
 Encoding: UTF-8
 Language: en-US
 LazyData: true

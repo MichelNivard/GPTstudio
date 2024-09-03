@@ -24,7 +24,6 @@ gptstudio_request_perform <- function(skeleton, ...) {
 #' @export
 gptstudio_request_perform.gptstudio_request_openai <- function(skeleton, ...,
                                                                shiny_session = NULL) {
-  # Translate request
 
   skeleton$history <- chat_history_append(
     history = skeleton$history,
@@ -37,46 +36,12 @@ gptstudio_request_perform.gptstudio_request_openai <- function(skeleton, ...,
     skeleton$history <- add_docs_messages_to_history(skeleton$history)
   }
 
-  body <- list(
-    "model"      = skeleton$model,
-    "stream"     = skeleton$stream,
-    "messages"   = skeleton$history,
-    "max_tokens" = skeleton$extras$max_tokens,
-    "n"          = skeleton$extra$n
-  )
+  response <- create_chat_openai(prompt = skeleton$history,
+                                 model = skeleton$model,
+                                 stream = skeleton$stream,
+                                 shiny_session = shiny_session,
+                                 user_prompt = skeleton$prompt)
 
-  # Create request
-  request <- request(skeleton$url) |>
-    req_auth_bearer_token(skeleton$api_key) |>
-    req_body_json(body)
-
-  # Perform request
-  response <- NULL
-
-  if (isTRUE(skeleton$stream)) {
-    if (is.null(shiny_session)) stop("Stream requires a shiny session object")
-
-    stream_handler <- OpenaiStreamParser$new(
-      session = shiny_session,
-      user_prompt = skeleton$prompt
-    )
-
-    stream_chat_completion(
-      messages = skeleton$history,
-      element_callback = stream_handler$parse_sse,
-      model = skeleton$model,
-      openai_api_key = skeleton$api_key
-    )
-
-    response <- stream_handler$value
-  } else {
-    response_json <- request |>
-      req_perform() |>
-      resp_body_json()
-
-    response <- response_json$choices[[1]]$message$content
-  }
-  # return value
   structure(
     list(
       skeleton = skeleton,
@@ -104,50 +69,68 @@ gptstudio_request_perform.gptstudio_request_huggingface <-
   }
 
 #' @export
-gptstudio_request_perform.gptstudio_request_google <-
-  function(skeleton, ...) {
-    response <- create_completion_google(prompt = skeleton$prompt)
-    structure(
-      list(
-        skeleton = skeleton,
-        response = response
-      ),
-      class = "gptstudio_response_google"
-    )
+gptstudio_request_perform.gptstudio_request_google <- function(skeleton, ...) {
+  skeleton$history <- chat_history_append(
+    history = skeleton$history,
+    role = "user",
+    name = "user_message",
+    content = skeleton$prompt
+  )
+
+  if (getOption("gptstudio.read_docs")) {
+    skeleton$history <- add_docs_messages_to_history(skeleton$history)
   }
+
+  response <- create_chat_google(prompt = skeleton$history,
+                                 model = skeleton$model)
+
+  structure(
+    list(
+      skeleton = skeleton,
+      response = response
+    ),
+    class = "gptstudio_response_google"
+  )
+}
 
 #' @export
-gptstudio_request_perform.gptstudio_request_anthropic <-
-  function(skeleton, ...) {
-    model <- skeleton$model
+gptstudio_request_perform.gptstudio_request_anthropic <- function(skeleton,
+                                                                  shiny_session = NULL,
+                                                                  ...) {
+  model  <- skeleton$model
+  stream <- skeleton$stream
+  prompt <- skeleton$prompt
 
-    skeleton$history <- chat_history_append(
-      history = skeleton$history,
-      role = "user",
-      content = skeleton$prompt
-    )
+  skeleton$history <- chat_history_append(
+    history = skeleton$history,
+    role = "user",
+    content = skeleton$prompt
+  )
 
-    # Anthropic does not have a system message, so convert it to user
-    system <-
-      purrr::keep(skeleton$history, function(x) x$role == "system") |>
-      purrr::pluck("content")
-    history <-
-      purrr::keep(skeleton$history, function(x) x$role %in% c("user", "assistant"))
+  # Anthropic does not have a system message, so convert it to user
+  system <-
+    purrr::keep(skeleton$history, function(x) x$role == "system") |>
+    purrr::pluck("content")
+  history <-
+    purrr::keep(skeleton$history, function(x) x$role %in% c("user", "assistant"))
 
-    cli_inform(c("i" = "Using Anthropic API with {model} model"))
-    response <- create_completion_anthropic(
-      prompt = history,
-      system = system,
-      model = model
-    )
-    structure(
-      list(
-        skeleton = skeleton,
-        response = response
-      ),
-      class = "gptstudio_response_anthropic"
-    )
-  }
+  cli_inform(c("i" = "Using Anthropic API with {model} model"))
+  response <- create_completion_anthropic(
+    prompt = history,
+    system = system,
+    model = model,
+    stream = stream,
+    shiny_session = shiny_session,
+    user_prompt = prompt
+  )
+  structure(
+    list(
+      skeleton = skeleton,
+      response = response
+    ),
+    class = "gptstudio_response_anthropic"
+  )
+}
 
 #' @export
 gptstudio_request_perform.gptstudio_request_azure_openai <- function(skeleton,
@@ -161,24 +144,15 @@ gptstudio_request_perform.gptstudio_request_azure_openai <- function(skeleton,
     content = skeleton$prompt
   )
 
-  if (isTRUE(skeleton$stream)) {
-    if (is.null(shiny_session)) stop("Stream requires a shiny session object")
-
-    stream_handler <- OpenaiStreamParser$new(
-      session = shiny_session,
-      user_prompt = skeleton$prompt
-    )
-
-    stream_azure_openai(
-      messages = skeleton$history,
-      element_callback = stream_handler$parse_sse
-    )
-
-    response <- stream_handler$value
-  } else {
-    response <- query_api_azure_openai(request_body = skeleton$history)
-    response <- response$choices[[1]]$message$content
+  if (getOption("gptstudio.read_docs")) {
+    skeleton$history <- add_docs_messages_to_history(skeleton$history)
   }
+
+  response <- create_chat_azure_openai(prompt = skeleton$history,
+                                       model = skeleton$model,
+                                       stream = skeleton$stream,
+                                       shiny_session = shiny_session,
+                                       user_prompt = skeleton$prompt)
 
   structure(
     list(
@@ -205,9 +179,9 @@ gptstudio_request_perform.gptstudio_request_ollama <- function(skeleton, ...,
     skeleton$history <- add_docs_messages_to_history(skeleton$history)
   }
 
-  response <- ollama_chat(
+  response <- create_chat_ollama(
     model = skeleton$model,
-    messages = skeleton$history,
+    prompt = skeleton$history,
     stream = skeleton$stream,
     shiny_session = shiny_session,
     user_prompt = skeleton$prompt
@@ -217,7 +191,7 @@ gptstudio_request_perform.gptstudio_request_ollama <- function(skeleton, ...,
   structure(
     list(
       skeleton = skeleton,
-      response = response$message$content
+      response = response
     ),
     class = "gptstudio_response_ollama"
   )
